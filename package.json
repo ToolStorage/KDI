@@ -1,0 +1,19 @@
+{
+  "name": "com.kylin.di",
+  "version": "1.0.0",
+  "displayName": "KDI (Kylin Dependency Injection)",
+  "description": "Scope-based dependency injection framework for Unity 6. Field injection only, hierarchical scopes, built-in reactive properties.",
+  "unity": "6000.0",
+  "documentationUrl": "",
+  "license": "MIT",
+  "keywords": [
+    "dependency-injection",
+    "di",
+    "ioc",
+    "scope",
+    "reactive"
+  ],
+  "author": {
+    "name": "Kylin"
+  }
+}
