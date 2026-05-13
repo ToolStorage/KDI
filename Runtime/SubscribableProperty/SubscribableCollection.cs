@@ -89,7 +89,7 @@ namespace Kylin.SubscribableProperty
     }
     [Serializable]
     [MessagePackObject(true)]
-    public class SubscribableCollection<T> : ISubscribableCollection<T>, ISerializationCallbackReceiver
+    public class SubscribableCollection<T> : ISubscribableCollection<T>, ISerializationCallbackReceiver, ISubscribablePending
     {
         [Key(0)]
         [SerializeField]
@@ -97,6 +97,10 @@ namespace Kylin.SubscribableProperty
 
         private event Action<CollectionChangeEvent<T>> _collectionChanged;
         private event Action<int> _countChanged;
+
+        // 트랜잭션 모드 pending 상태. 변경 이벤트는 순서를 보존해주기 위해 리스트 사용.
+        [IgnoreMember] [NonSerialized] private List<CollectionChangeEvent<T>> _pendingChanges;
+        [IgnoreMember] [NonSerialized] private bool _hasPendingCountChange;
 
         public SubscribableCollection()
         {
@@ -258,12 +262,51 @@ namespace Kylin.SubscribableProperty
 
         private void NotifyCollectionChanged(CollectionChangeEvent<T> changeEvent)
         {
-            _collectionChanged?.Invoke(changeEvent);
+            if (Reaction.IsActive)
+            {
+                _pendingChanges ??= new List<CollectionChangeEvent<T>>();
+                _pendingChanges.Add(changeEvent);
+                Reaction.RegisterPending(this);
+            }
+            else
+            {
+                _collectionChanged?.Invoke(changeEvent);
+            }
         }
 
         private void NotifyCountChanged()
         {
-            _countChanged?.Invoke(Count);
+            if (Reaction.IsActive)
+            {
+                _hasPendingCountChange = true;
+                Reaction.RegisterPending(this);
+            }
+            else
+            {
+                _countChanged?.Invoke(Count);
+            }
+        }
+
+        void ISubscribablePending.FlushPendingNotification()
+        {
+            // 변경 이벤트: 트랜잭션 내 발생 순서대로 invoke (Add/Remove 시퀀스 의미 보존).
+            // List 는 영구 보유 + Clear() 재사용 -- 매 트랜잭션 alloc 0.
+            if (_pendingChanges != null && _pendingChanges.Count > 0)
+            {
+                int count = _pendingChanges.Count;
+                for (int i = 0; i < count; i++)
+                {
+                    _collectionChanged?.Invoke(_pendingChanges[i]);
+                }
+                _pendingChanges.Clear();
+            }
+
+            // Count 변경: 트랜잭션 내 다중 발생을 합쳐 *최종 Count* 로 1회만 invoke.
+            if (_hasPendingCountChange)
+            {
+                _hasPendingCountChange = false;
+                _countChanged?.Invoke(Count);
+            }
         }
 
         void ISerializationCallbackReceiver.OnBeforeSerialize() { }

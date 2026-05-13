@@ -17,11 +17,17 @@ namespace Kylin.SubscribableProperty
     }
     [Serializable]
     [MessagePackObject(true)]
-    public partial class SubscribableProperty<T> : ISubscribableProperty<T>, ISerializationCallbackReceiver
+    public partial class SubscribableProperty<T> : ISubscribableProperty<T>, ISerializationCallbackReceiver, ISubscribablePending
     {
         [MessagePack.Key(0)]
         [SerializeField]
         private T value;
+
+        // Reaction 안에서 변경되���는지 표시.
+        // 같은 스코프 내 다중 변경이 발생해도 outermost Dispose 시 최종 값으로 1회만 invoke
+        [IgnoreMember]
+        [NonSerialized]
+        private bool _hasPendingNotification;
 
         public SubscribableProperty()
         {
@@ -44,9 +50,24 @@ namespace Kylin.SubscribableProperty
                 if (!EqualityComparer<T>.Default.Equals(this.value, value))
                 {
                     this.value = value;
-                    ValueChanged?.Invoke(this.value);
+                    if (Reaction.IsActive)
+                    {
+                        _hasPendingNotification = true;
+                        Reaction.RegisterPending(this);
+                    }
+                    else
+                    {
+                        ValueChanged?.Invoke(this.value);
+                    }
                 }
             }
+        }
+
+        void ISubscribablePending.FlushPendingNotification()
+        {
+            if (!_hasPendingNotification) return;
+            _hasPendingNotification = false;
+            ValueChanged?.Invoke(value);
         }
 
         public IDisposable Subscribe(Action<T> onNext, bool invokeInitial = false)

@@ -49,7 +49,7 @@ namespace Kylin.SubscribableProperty
     }
     [Serializable]
     [MessagePackObject(true)]
-    public class SubscribableDictionary<TKey, TValue> : ISubscribableDictionary<TKey, TValue>, ISerializationCallbackReceiver
+    public class SubscribableDictionary<TKey, TValue> : ISubscribableDictionary<TKey, TValue>, ISerializationCallbackReceiver, ISubscribablePending
     {
         [Key(0)]
         [SerializeField]
@@ -63,6 +63,9 @@ namespace Kylin.SubscribableProperty
 
         private event Action<DictionaryChangeEvent<TKey, TValue>> _dictionaryChanged;
         private event Action<int> _countChanged;
+
+        [IgnoreMember] [NonSerialized] private List<DictionaryChangeEvent<TKey, TValue>> _pendingChanges;
+        [IgnoreMember] [NonSerialized] private bool _hasPendingCountChange;
 
         public SubscribableDictionary()
         {
@@ -232,12 +235,48 @@ namespace Kylin.SubscribableProperty
 
         private void NotifyDictionaryChanged(DictionaryChangeEvent<TKey, TValue> changeEvent)
         {
-            _dictionaryChanged?.Invoke(changeEvent);
+            if (Reaction.IsActive)
+            {
+                _pendingChanges ??= new List<DictionaryChangeEvent<TKey, TValue>>();
+                _pendingChanges.Add(changeEvent);
+                Reaction.RegisterPending(this);
+            }
+            else
+            {
+                _dictionaryChanged?.Invoke(changeEvent);
+            }
         }
 
         private void NotifyCountChanged()
         {
-            _countChanged?.Invoke(Count);
+            if (Reaction.IsActive)
+            {
+                _hasPendingCountChange = true;
+                Reaction.RegisterPending(this);
+            }
+            else
+            {
+                _countChanged?.Invoke(Count);
+            }
+        }
+
+        void ISubscribablePending.FlushPendingNotification()
+        {
+            if (_pendingChanges != null && _pendingChanges.Count > 0)
+            {
+                int count = _pendingChanges.Count;
+                for (int i = 0; i < count; i++)
+                {
+                    _dictionaryChanged?.Invoke(_pendingChanges[i]);
+                }
+                _pendingChanges.Clear();
+            }
+
+            if (_hasPendingCountChange)
+            {
+                _hasPendingCountChange = false;
+                _countChanged?.Invoke(Count);
+            }
         }
 
         #region Optimized Serialization Support
