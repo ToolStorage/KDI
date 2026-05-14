@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using MessagePack;
 using UnityEngine;
 
 namespace Kylin.SubscribableProperty
@@ -16,16 +15,13 @@ namespace Kylin.SubscribableProperty
         new T Value { get; set; }
     }
     [Serializable]
-    [MessagePackObject(true)]
     public partial class SubscribableProperty<T> : ISubscribableProperty<T>, ISerializationCallbackReceiver, ISubscribablePending
     {
-        [MessagePack.Key(0)]
         [SerializeField]
         private T value;
 
-        // Reaction 안에서 변경되���는지 표시.
+        // Reaction 안에서 변경되는지 표시.
         // 같은 스코프 내 다중 변경이 발생해도 outermost Dispose 시 최종 값으로 1회만 invoke
-        [IgnoreMember]
         [NonSerialized]
         private bool _hasPendingNotification;
 

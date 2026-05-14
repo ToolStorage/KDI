@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using MessagePack;
 
 namespace Kylin.SubscribableProperty
 {
@@ -88,10 +87,8 @@ namespace Kylin.SubscribableProperty
 
     }
     [Serializable]
-    [MessagePackObject(true)]
     public class SubscribableCollection<T> : ISubscribableCollection<T>, ISerializationCallbackReceiver, ISubscribablePending
     {
-        [Key(0)]
         [SerializeField]
         private List<T> _items = new List<T>();
 
@@ -99,8 +96,8 @@ namespace Kylin.SubscribableProperty
         private event Action<int> _countChanged;
 
         // 트랜잭션 모드 pending 상태. 변경 이벤트는 순서를 보존해주기 위해 리스트 사용.
-        [IgnoreMember] [NonSerialized] private List<CollectionChangeEvent<T>> _pendingChanges;
-        [IgnoreMember] [NonSerialized] private bool _hasPendingCountChange;
+        [NonSerialized] private List<CollectionChangeEvent<T>> _pendingChanges;
+        [NonSerialized] private bool _hasPendingCountChange;
 
         public SubscribableCollection()
         {

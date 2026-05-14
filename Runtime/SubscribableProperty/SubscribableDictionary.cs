@@ -3,7 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using MessagePack;
 
 namespace Kylin.SubscribableProperty
 {
@@ -48,14 +47,11 @@ namespace Kylin.SubscribableProperty
     {
     }
     [Serializable]
-    [MessagePackObject(true)]
     public class SubscribableDictionary<TKey, TValue> : ISubscribableDictionary<TKey, TValue>, ISerializationCallbackReceiver, ISubscribablePending
     {
-        [Key(0)]
         [SerializeField]
         private List<TKey> _keys = new List<TKey>();
 
-        [Key(1)]
         [SerializeField]
         private List<TValue> _values = new List<TValue>();
 
@@ -64,8 +60,8 @@ namespace Kylin.SubscribableProperty
         private event Action<DictionaryChangeEvent<TKey, TValue>> _dictionaryChanged;
         private event Action<int> _countChanged;
 
-        [IgnoreMember] [NonSerialized] private List<DictionaryChangeEvent<TKey, TValue>> _pendingChanges;
-        [IgnoreMember] [NonSerialized] private bool _hasPendingCountChange;
+        [NonSerialized] private List<DictionaryChangeEvent<TKey, TValue>> _pendingChanges;
+        [NonSerialized] private bool _hasPendingCountChange;
 
         public SubscribableDictionary()
         {
