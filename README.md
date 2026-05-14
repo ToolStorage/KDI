@@ -3,7 +3,7 @@
 Unity 6 전용 Scope 기반 경량 DI 프레임워크. 필드 주입 전용, 계층적 Scope, 반응형 프로퍼티 내장.
 
 ```
-com.kylin.di v1.0.0 | Unity 6000.0+ | MIT License
+com.kylin.di | Unity 6000.0+ | MIT License
 ```
 
 ---
