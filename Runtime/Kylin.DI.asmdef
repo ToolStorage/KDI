@@ -1,7 +1,9 @@
 {
     "name": "Kylin.DI",
     "rootNamespace": "Kylin",
-    "references": [],
+    "references": [
+        "Kylin.Subscribable"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

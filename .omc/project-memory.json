@@ -1,0 +1,229 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1773710696675,
+  "projectRoot": "C:\\ProjectControl\\KDIPackage",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "npm",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": {
+      "defaultBranch": "master",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "Runtime": {
+      "path": "Runtime",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1773710696650,
+      "keyFiles": [
+        "Attributes.meta",
+        "Core.meta",
+        "Debug.meta",
+        "DI.meta",
+        "Kylin.DI.asmdef"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "",
+      "accessCount": 5,
+      "lastAccessed": 1773710728288,
+      "type": "directory"
+    },
+    {
+      "path": "README.md",
+      "accessCount": 2,
+      "lastAccessed": 1773711146365,
+      "type": "file"
+    },
+    {
+      "path": "package.json",
+      "accessCount": 1,
+      "lastAccessed": 1773710732915,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\Kylin.DI.asmdef",
+      "accessCount": 1,
+      "lastAccessed": 1773710733554,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\DI\\KDI.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710733804,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\DI\\Scope.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710734108,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\DI\\Registration.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710734544,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\Core\\LifetimeScope.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710734976,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\Core\\DIBehaviour.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710735204,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\DI\\DependencyBuilder.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710739245,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\DI\\DependencyInjector.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710739574,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\DI\\InstanceFactory.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710740017,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\DI\\ScopeBuilder.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710740465,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\DI\\ScopeExtensions.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710740905,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\Attributes\\InjectAttribute.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710741924,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\Attributes\\ViewModelAttribute.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710742234,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\Update\\UpdateLoopManager.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710742681,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\SubscribableProperty\\SubscribableProperty.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710742957,
+      "type": "file"
+    },
+    {
+      "path": "CLAUDE.md",
+      "accessCount": 1,
+      "lastAccessed": 1773710790027,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\SubscribableProperty\\SubscribableCollection.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710989419,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\SubscribableProperty\\SubscribablePropertyExtensions.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710989888,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\SubscribableProperty\\SubscribablePropertyLinq.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710990457,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\SubscribableProperty\\SubscribableCommand.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710990803,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\SubscribableProperty\\SubscribableDictionary.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710991251,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\SubscribableProperty\\SubscribableCollectionExtensions.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710991698,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\Update\\IUpdatable.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710992139,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\Update\\IUpdatePriority.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710992657,
+      "type": "file"
+    },
+    {
+      "path": "Runtime\\Debug\\ClosureAnalyzer.cs",
+      "accessCount": 1,
+      "lastAccessed": 1773710993007,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}
