@@ -1,0 +1,11 @@
+# AI assistant / agent artifacts (never publish to npm or share with consumers)
+CLAUDE.md
+.claude/
+.omc/
+.cursor/
+.aider*
+.codex/
+
+# OS junk
+.DS_Store
+Thumbs.db
