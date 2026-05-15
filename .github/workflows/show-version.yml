@@ -1,0 +1,28 @@
+name: Show Current Version
+
+on:
+  workflow_dispatch:
+
+jobs:
+  show:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Show versions
+        run: |
+          PKG_NAME=$(node -p "require('./package.json').name")
+          REPO_VERSION=$(node -p "require('./package.json').version")
+          NPM_VERSION=$(npm view "$PKG_NAME" version 2>/dev/null || echo "(not published)")
+          {
+            echo "## $PKG_NAME"
+            echo ""
+            echo "| Source | Version |"
+            echo "| ------ | ------- |"
+            echo "| Repo (package.json) | \`$REPO_VERSION\` |"
+            echo "| npm latest | \`$NPM_VERSION\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

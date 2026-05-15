@@ -3,6 +3,12 @@ name: Publish to npmjs
 on:
   push:
     branches: [master]
+  workflow_call:
+    inputs:
+      bump_type:
+        type: string
+        required: false
+        default: ''
 
 jobs:
   publish:
@@ -19,6 +25,20 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version (when invoked by Manual Publish)
+        if: inputs.bump_type
+        run: |
+          NEW_VERSION=$(npm version "${{ inputs.bump_type }}" --no-git-tag-version | sed 's/^v//')
+          git add package.json
+          git commit -m "release:v$NEW_VERSION"
+          git push origin HEAD
+          echo "Bumped package.json to v$NEW_VERSION"
 
       - name: Check version against existing tag
         id: check
@@ -44,7 +64,5 @@ jobs:
       - name: Tag the published version
         if: steps.check.outputs.should_publish == 'true'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag "v${{ steps.check.outputs.version }}"
           git push origin "v${{ steps.check.outputs.version }}"

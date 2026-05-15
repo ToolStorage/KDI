@@ -1,0 +1,22 @@
+name: Manual Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Which version part to bump'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  delegate:
+    permissions:
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/publish.yml
+    with:
+      bump_type: ${{ inputs.bump_type }}
