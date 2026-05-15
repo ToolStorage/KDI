@@ -37,14 +37,14 @@ jobs:
         if: steps.check.outputs.should_publish == 'true'
         run: npm install -g npm@latest
 
-      - name: Create and push tag
+      - name: Publish with trusted publishing
+        if: steps.check.outputs.should_publish == 'true'
+        run: npm publish --access public
+
+      - name: Tag the published version
         if: steps.check.outputs.should_publish == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag "v${{ steps.check.outputs.version }}"
           git push origin "v${{ steps.check.outputs.version }}"
-
-      - name: Publish with trusted publishing
-        if: steps.check.outputs.should_publish == 'true'
-        run: npm publish --access public
