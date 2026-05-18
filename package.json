@@ -1,6 +1,6 @@
 {
   "name": "com.kylin.di",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "displayName": "KDI (Kylin Dependency Injection)",
   "description": "Scope-based dependency injection framework for Unity 6. Field injection only, hierarchical scopes.",
   "unity": "6000.0",
