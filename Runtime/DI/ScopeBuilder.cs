@@ -46,15 +46,28 @@ namespace Kylin.DI
         {
             ThrowIfBuilt();
 
+            // 기본 서비스 타입 + AlsoBind 별칭 타입들을 모두 같은 Registration으로 등록
+            // (별칭들은 동일한 단일 인스턴스를 공유)
+            RegisterKey(registration.ServiceType, registration);
+
+            if (registration.AliasTypes != null)
+            {
+                foreach (var alias in registration.AliasTypes)
+                    RegisterKey(alias, registration);
+            }
+        }
+
+        private void RegisterKey(Type serviceType, Registration registration)
+        {
             // 같은 스코프 내 재등록은 무음 덮어쓰기 대신 즉시 실패 — 오버라이드는 자식 스코프에서
-            if (_registrations.ContainsKey(registration.ServiceType))
+            if (_registrations.ContainsKey(serviceType))
             {
                 throw new InvalidOperationException(
-                    $"[KDI] {registration.ServiceType.Name}이(가) 이미 등록되어 있습니다. " +
+                    $"[KDI] {serviceType.Name}이(가) 이미 등록되어 있습니다. " +
                     "같은 스코프 내 재등록은 허용되지 않습니다 — 오버라이드가 필요하면 자식 스코프에서 등록하세요.");
             }
 
-            _registrations[registration.ServiceType] = registration;
+            _registrations[serviceType] = registration;
         }
 
         public IScope Build(IScope parent = null, string name = null)

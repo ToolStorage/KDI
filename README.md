@@ -278,10 +278,48 @@ protected override void Configure(ScopeBuilder builder)
         var dep = scope.Resolve<IDependency>();
         return new ServiceImpl(dep);
     }).AsScoped();
+
+    // 다중 인터페이스 → 단일 인스턴스 (AlsoBind)
+    builder.Bind<IPlayerService>().To<PlayerService>()
+           .AlsoBind<IDamageReceiver>().AsScoped();
+
+    // 엔트리포인트 — 아무도 주입하지 않아도 빌드 시점에 즉시 기동
+    builder.Bind<GameSimulation>().ToSelf().AsEntryPoint().AsScoped();
 }
 ```
 
 `To<T>()`의 타입 제약: `T`는 반드시 `IDependencyObject`와 바인딩 인터페이스를 동시에 구현해야 한다.
+
+### AlsoBind — 하나의 인스턴스를 여러 인터페이스로
+
+한 구현체를 여러 인터페이스로 노출해야 할 때, 각각 `To`로 등록하면 **인스턴스가 인터페이스 수만큼 생겨** 상태가 분열된다. `AlsoBind`는 이들을 **동일한 단일 인스턴스**로 묶는다:
+
+```csharp
+// PlayerService : IPlayerService, IDamageReceiver
+builder.Bind<IPlayerService>().To<PlayerService>()
+       .AlsoBind<IDamageReceiver>().AsScoped();
+
+// IPlayerService, IDamageReceiver 어느 쪽으로 resolve하든 같은 PlayerService
+```
+
+구현체가 별칭 인터페이스를 구현하지 않으면 Build 타임 에러(팩토리 등록은 생성 시점 검증).
+
+### AsEntryPoint — 지연 생성 우회
+
+KDI는 lazy resolve이므로, **아무 곳에서도 주입받지 않는 서비스는 생성되지 않는다.** `IUpdatable` 시뮬레이션처럼 스스로 돌아야 하는 시스템 서비스가 이 함정에 빠진다(등록했는데 `KDIUpdate`가 안 불림). `AsEntryPoint()`는 스코프 빌드 시점에 즉시 인스턴스화한다:
+
+```csharp
+public class GameSimulation : IDependencyObject, IInjectable, IUpdatable
+{
+    [Inject] private IGameState _state;
+    public void KDIUpdate(float dt) => _state.Tick(dt);
+}
+
+// 아무도 GameSimulation을 [Inject]하지 않아도 빌드 시 생성 + Update 루프 등록
+builder.Bind<GameSimulation>().ToSelf().AsEntryPoint().AsScoped();
+```
+
+생성 시 `[Inject]` 주입과 `IPostInjectable.PostInject()`가 함께 실행된다. 엔트리포인트가 서로 의존하면 resolve 순서가 자연히 의존성 순서를 따른다(A가 B를 주입하면 B가 먼저 생성). Transient는 eager 생성해도 캐시되지 않아 유실되므로 `AsEntryPoint`와 함께 쓸 수 없다(Build 에러).
 
 **Build 타임 검증** — 아래 실수는 조용히 넘어가지 않고 `Build()`(= LifetimeScope 초기화) 시점에 즉시 에러가 된다:
 

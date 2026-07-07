@@ -62,25 +62,45 @@ namespace Kylin.DI
             _instances[typeof(IInstantiator)] = new Instantiator(this);
 
             InjectInstanceRegistrations();
+            InstantiateEntryPoints();
+        }
+
+        /// <summary>
+        /// 인스턴스를 기본 서비스 타입 + 모든 AlsoBind 별칭 키에 캐시한다.
+        /// 어느 별칭으로 resolve하든 동일한 단일 인스턴스가 반환되도록 보장한다.
+        /// </summary>
+        private void CacheInstance(Registration reg, object instance)
+        {
+            _instances[reg.ServiceType] = instance;
+            if (reg.AliasTypes != null)
+            {
+                foreach (var alias in reg.AliasTypes)
+                    _instances[alias] = instance;
+            }
         }
 
         /// <summary>
         /// FromInstance/RegisterInstance로 등록된 인스턴스는 빌드 시점에 즉시 주입 + Update 루프 등록.
         /// 지연 주입 대신 eager 처리하여 배선 실패가 Build()에서 결정적으로 드러나게 한다.
+        /// AlsoBind로 인해 _registrations.Values에는 같은 Registration이 여러 번 나타나므로
+        /// Registration 기준으로 중복을 제거하여 이중 주입(PostInject 2회 호출 등)을 방지한다.
         /// </summary>
         private void InjectInstanceRegistrations()
         {
+            var seen = new HashSet<Registration>();
+
             // 1) 먼저 전부 캐시에 올려 인스턴스끼리 서로 주입받을 수 있게 한다
             foreach (var reg in _registrations.Values)
             {
-                if (reg.Instance != null)
-                    _instances[reg.ServiceType] = reg.Instance;
+                if (reg.Instance == null || !seen.Add(reg)) continue;
+                CacheInstance(reg, reg.Instance);
             }
 
             // 2) 주입 + Update 루프 등록
+            seen.Clear();
             foreach (var reg in _registrations.Values)
             {
-                if (reg.Instance == null) continue;
+                if (reg.Instance == null || !seen.Add(reg)) continue;
 
                 if (reg.Instance is IInjectable injectable)
                     DependencyInjector.Inject(injectable, this);
@@ -88,6 +108,21 @@ namespace Kylin.DI
                     DependencyInjector.WarnIfHasInjectFieldsWithoutIInjectable(reg.Instance);
 
                 RegisterToUpdateLoop(reg.Instance);
+            }
+        }
+
+        /// <summary>
+        /// AsEntryPoint로 지정된 등록을 빌드 시점에 즉시 resolve하여 인스턴스화한다.
+        /// lazy resolve 우회 — 아무도 주입하지 않는 시스템 서비스도 확실히 생성/기동된다.
+        /// 의존성 순서는 resolve가 자연히 처리한다(A가 B를 [Inject]하면 B가 먼저 생성).
+        /// </summary>
+        private void InstantiateEntryPoints()
+        {
+            var seen = new HashSet<Registration>();
+            foreach (var reg in _registrations.Values)
+            {
+                if (!reg.IsEntryPoint || !seen.Add(reg)) continue;
+                Resolve(reg.ServiceType);
             }
         }
 
@@ -143,7 +178,7 @@ namespace Kylin.DI
                 {
                     lock (_lock)
                     {
-                        _instances[type] = instance;
+                        CacheInstance(reg, instance);
                     }
                 }
 
@@ -167,6 +202,18 @@ namespace Kylin.DI
             if (registration.Factory != null)
             {
                 instance = registration.Factory(this);
+
+                // 팩토리 생성물은 빌드 타임에 타입을 알 수 없으므로 AlsoBind 별칭 검증을 여기서 수행
+                if (registration.AliasTypes != null)
+                {
+                    foreach (var alias in registration.AliasTypes)
+                    {
+                        if (!alias.IsInstanceOfType(instance))
+                            throw new InvalidOperationException(
+                                $"[KDI] ({_name}) 팩토리가 생성한 {instance.GetType().Name}이(가) " +
+                                $"AlsoBind 대상 {alias.Name}을(를) 구현하지 않습니다.");
+                    }
+                }
             }
             else
             {

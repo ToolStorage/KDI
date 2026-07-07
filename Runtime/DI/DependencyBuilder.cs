@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Kylin.DI
 {
@@ -15,10 +16,12 @@ namespace Kylin.DI
     {
         private readonly ScopeBuilder _builder;
         private readonly Type _serviceType;
+        private readonly List<Type> _aliasTypes = new();
         private Type _implementationType;
         private Lifetime _lifetime = Lifetime.Singleton;
         private object _instance;
         private Func<IScope, object> _factory;
+        private bool _isEntryPoint;
         private bool _isCompleted;
 
         Type IPendingBinding.ServiceType => _serviceType;
@@ -112,15 +115,50 @@ namespace Kylin.DI
             return this;
         }
 
+        /// <summary>
+        /// 추가 서비스 타입 바인딩 — 같은 단일 인스턴스를 여러 인터페이스로 노출한다.
+        /// 예: Bind&lt;IPlayerService&gt;().To&lt;PlayerService&gt;().AlsoBind&lt;IDamageReceiver&gt;().AsScoped()
+        /// → IPlayerService, IDamageReceiver 모두 동일한 PlayerService 인스턴스로 resolve.
+        /// (각각 To로 등록하면 인스턴스가 2개 생기는 문제를 방지)
+        /// </summary>
+        public DependencyBuilder<T> AlsoBind<TAlias>() where TAlias : class
+        {
+            _aliasTypes.Add(typeof(TAlias));
+            return this;
+        }
+
+        /// <summary>
+        /// 엔트리포인트 지정 — 스코프 빌드 시점에 즉시 인스턴스화한다.
+        /// lazy resolve로 인해 "아무도 주입하지 않으면 생성되지 않는" 시스템 서비스
+        /// (IUpdatable 시뮬레이션 등)를 확실히 기동시킬 때 사용.
+        /// 생성 시 [Inject] 주입과 IPostInjectable.PostInject()가 함께 실행된다.
+        /// </summary>
+        public DependencyBuilder<T> AsEntryPoint()
+        {
+            _isEntryPoint = true;
+            return this;
+        }
+
         private void FinishRegistration()
         {
+            var aliases = BuildAndValidateAliases();
+
+            if (_isEntryPoint && _lifetime == Lifetime.Transient && _instance == null)
+            {
+                throw new InvalidOperationException(
+                    $"[KDI] Bind<{_serviceType.Name}>(): 엔트리포인트는 Transient일 수 없습니다. " +
+                    "eager 인스턴스화된 Transient는 캐시되지 않아 즉시 유실됩니다. AsScoped()/AsSingleton()을 사용하세요.");
+            }
+
             if (_instance != null)
             {
                 _builder.AddRegistration(new Registration
                 {
                     ServiceType = _serviceType,
                     Instance = _instance,
-                    Lifetime = Lifetime.Scoped
+                    Lifetime = Lifetime.Scoped,
+                    AliasTypes = aliases,
+                    IsEntryPoint = _isEntryPoint
                 });
             }
             else if (_factory != null)
@@ -129,7 +167,9 @@ namespace Kylin.DI
                 {
                     ServiceType = _serviceType,
                     Factory = _factory,
-                    Lifetime = _lifetime
+                    Lifetime = _lifetime,
+                    AliasTypes = aliases,
+                    IsEntryPoint = _isEntryPoint
                 });
             }
             else if (_implementationType != null)
@@ -138,7 +178,9 @@ namespace Kylin.DI
                 {
                     ServiceType = _serviceType,
                     ImplementationType = _implementationType,
-                    Lifetime = _lifetime
+                    Lifetime = _lifetime,
+                    AliasTypes = aliases,
+                    IsEntryPoint = _isEntryPoint
                 });
             }
             else
@@ -148,6 +190,41 @@ namespace Kylin.DI
             }
 
             _isCompleted = true;
+        }
+
+        /// <summary>
+        /// AlsoBind 대상 타입들을 검증한다.
+        /// 구현타입/인스턴스를 아는 경우 즉시 검사(빌드 타임 fail-fast),
+        /// 팩토리는 생성 시점에 Scope가 검사한다.
+        /// </summary>
+        private Type[] BuildAndValidateAliases()
+        {
+            if (_aliasTypes.Count == 0) return null;
+
+            foreach (var alias in _aliasTypes)
+            {
+                if (alias == _serviceType)
+                {
+                    throw new InvalidOperationException(
+                        $"[KDI] Bind<{_serviceType.Name}>(): AlsoBind<{alias.Name}> 대상이 Bind 타입과 동일합니다.");
+                }
+
+                if (_implementationType != null && !alias.IsAssignableFrom(_implementationType))
+                {
+                    throw new InvalidOperationException(
+                        $"[KDI] Bind<{_serviceType.Name}>(): 구현타입 {_implementationType.Name}이(가) " +
+                        $"AlsoBind 대상 {alias.Name}을(를) 구현하지 않습니다.");
+                }
+
+                if (_instance != null && !alias.IsInstanceOfType(_instance))
+                {
+                    throw new InvalidOperationException(
+                        $"[KDI] Bind<{_serviceType.Name}>(): 인스턴스 {_instance.GetType().Name}이(가) " +
+                        $"AlsoBind 대상 {alias.Name}을(를) 구현하지 않습니다.");
+                }
+            }
+
+            return _aliasTypes.ToArray();
         }
     }
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.3.0] - 2026-07-07
+
+### Added
+- `Bind<T>().AsEntryPoint()` — 스코프 빌드 시점에 즉시 인스턴스화. lazy resolve로 인해 "아무도 주입하지 않으면 생성되지 않던" 시스템 서비스(IUpdatable 시뮬레이션 등)를 확실히 기동. 생성 시 `[Inject]` 주입 + `IPostInjectable.PostInject()`가 함께 실행되며, 의존성 순서는 resolve가 자연히 처리 (별도 IStartable 인터페이스 없음)
+- `Bind<T>().To<TImpl>().AlsoBind<TOther>()` — 하나의 단일 인스턴스를 여러 인터페이스로 노출. 기존에는 같은 구현을 두 번 `To`로 등록하면 인스턴스가 2개 생겨 상태가 분열되던 footgun을 해소. 별칭 타입이 구현체와 맞지 않으면 빌드 타임 에러(팩토리는 생성 시점 검증)
+
 ## [1.2.0] - 2026-07-07
 
 ### Added
