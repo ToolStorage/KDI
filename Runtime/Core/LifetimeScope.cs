@@ -102,12 +102,12 @@ namespace Kylin.DI
                 {
                     _parent.Initialize();
                 }
-                _scope = builder.Build(_parent.Scope);
+                _scope = builder.Build(_parent.Scope, GetType().Name);
             }
             else
             {
                 // parent가 없으면 RootScope로 빌드
-                _scope = builder.Build(parent: null);
+                _scope = builder.Build(parent: null, name: GetType().Name);
                 KDI.SetRootScope(_scope);
             }
 
@@ -116,6 +116,10 @@ namespace Kylin.DI
             _activeScopes.Add(this);
 
             _isInitialized = true;
+
+            // 자기 GameObject의 IInjectable 주입 — 부모 스코프는 이 GO를 경계로 보고 건너뛰므로
+            // 여기서 주입하지 않으면 아무도 주입해주지 않는다
+            InjectSelf();
 
             // 하위 계층 IInjectable 일괄 주입 (Push)
             InjectChildren();
@@ -151,6 +155,30 @@ namespace Kylin.DI
         private void InjectChildren()
         {
             InjectHierarchy(transform);
+        }
+
+        /// <summary>
+        /// LifetimeScope 자신의 GameObject에 붙은 IInjectable 컴포넌트 주입.
+        /// </summary>
+        private void InjectSelf()
+        {
+            var injectables = GetComponents<IInjectable>();
+            foreach (var injectable in injectables)
+            {
+                if (injectable is LifetimeScope) continue;
+
+                DependencyInjector.Inject(injectable, _scope);
+
+                if (injectable is DIBehaviour dib)
+                    dib.SetInjected(_scope);
+            }
+
+            var behaviours = GetComponents<MonoBehaviour>();
+            foreach (var mb in behaviours)
+            {
+                if (mb == null || mb is IInjectable || mb is LifetimeScope) continue;
+                DependencyInjector.WarnIfHasInjectFieldsWithoutIInjectable(mb);
+            }
         }
 
         private void InjectHierarchy(Transform current)

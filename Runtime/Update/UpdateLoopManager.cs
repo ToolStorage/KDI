@@ -32,6 +32,16 @@ namespace Kylin.DI
             }
         }
 
+        /// <summary>
+        /// 존재하는 인스턴스만 반환 (없으면 생성하지 않고 null).
+        /// 씬 종료/Scope Dispose 경로에서 사용 — Instance getter는
+        /// 파괴 시점에 새 GameObject를 만들어버릴 수 있다.
+        /// </summary>
+        internal static UpdateLoopManager TryGetInstance()
+        {
+            return _applicationQuitting ? null : _instance;
+        }
+
         private List<IUpdatable> _updatables = new List<IUpdatable>();
         private List<IFixedUpdatable> _fixedUpdatables = new List<IFixedUpdatable>();
         private List<ILateUpdatable> _lateUpdatables = new List<ILateUpdatable>();

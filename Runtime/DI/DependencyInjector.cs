@@ -30,13 +30,10 @@ namespace Kylin.DI
         }
 
         /// <summary>
-        /// scope 없이 호출 시 KDI.RootScope에서 Resolve
+        /// 지정한 scope에서 target의 [Inject] 필드를 주입한다.
+        /// scope 없는 오버로드는 제공하지 않는다 — RootScope 셀프 주입은
+        /// 서비스 로케이터 패턴이 되므로, 주입은 항상 "만드는 쪽"이 스코프를 지정해 수행한다.
         /// </summary>
-        public static void Inject(this IInjectable target)
-        {
-            Inject(target, KDI.RootScope);
-        }
-
         public static void Inject(this IInjectable target, IScope scope)
         {
             if (target == null || scope == null) return;

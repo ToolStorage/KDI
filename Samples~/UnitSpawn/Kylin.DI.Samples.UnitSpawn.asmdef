@@ -1,0 +1,17 @@
+{
+    "name": "Kylin.DI.Samples.UnitSpawn",
+    "rootNamespace": "Kylin",
+    "references": [
+        "Kylin.DI",
+        "Kylin.Subscribable"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

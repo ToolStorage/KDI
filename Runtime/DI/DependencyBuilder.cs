@@ -2,7 +2,16 @@ using System;
 
 namespace Kylin.DI
 {
-    public class DependencyBuilder<T> where T : class
+    /// <summary>
+    /// ScopeBuilder가 미완결 fluent 체인을 Build()에서 검출하기 위한 내부 추적 인터페이스.
+    /// </summary>
+    internal interface IPendingBinding
+    {
+        Type ServiceType { get; }
+        bool IsCompleted { get; }
+    }
+
+    public class DependencyBuilder<T> : IPendingBinding where T : class
     {
         private readonly ScopeBuilder _builder;
         private readonly Type _serviceType;
@@ -10,6 +19,10 @@ namespace Kylin.DI
         private Lifetime _lifetime = Lifetime.Singleton;
         private object _instance;
         private Func<IScope, object> _factory;
+        private bool _isCompleted;
+
+        Type IPendingBinding.ServiceType => _serviceType;
+        bool IPendingBinding.IsCompleted => _isCompleted;
 
         internal DependencyBuilder(ScopeBuilder builder, Type serviceType)
         {
@@ -24,6 +37,28 @@ namespace Kylin.DI
             where TImplementation : IDependencyObject, T
         {
             _implementationType = typeof(TImplementation);
+            return this;
+        }
+
+        /// <summary>
+        /// 자기 바인딩 — 서비스 타입 자신을 구현타입으로 사용.
+        /// 구체 타입 주입이 필요할 때(예: KDILayered의 [OwnerOnly] 패턴) 사용.
+        /// </summary>
+        public DependencyBuilder<T> ToSelf()
+        {
+            if (typeof(T).IsInterface || typeof(T).IsAbstract)
+            {
+                throw new InvalidOperationException(
+                    $"[KDI] ToSelf()는 구체 타입에만 사용할 수 있습니다: {typeof(T).Name}. 인터페이스는 To<TImplementation>()을 사용하세요.");
+            }
+
+            if (!typeof(IDependencyObject).IsAssignableFrom(typeof(T)))
+            {
+                throw new InvalidOperationException(
+                    $"[KDI] {typeof(T).Name}은(는) IDependencyObject를 구현해야 합니다.");
+            }
+
+            _implementationType = typeof(T);
             return this;
         }
 
@@ -63,7 +98,8 @@ namespace Kylin.DI
             }
             else
             {
-                throw new ArgumentException($"Instance must implement IDependencyObject");
+                throw new ArgumentException(
+                    $"[KDI] FromInstance 인스턴스는 IDependencyObject를 구현해야 합니다: {typeof(T).Name}");
             }
         }
 
@@ -107,8 +143,11 @@ namespace Kylin.DI
             }
             else
             {
-                throw new InvalidOperationException("[KDI] Registration is incomplete");
+                throw new InvalidOperationException(
+                    $"[KDI] Bind<{_serviceType.Name}>(): To<TImplementation>() / ToSelf() / FromFactory() / FromInstance() 없이 종결할 수 없습니다.");
             }
+
+            _isCompleted = true;
         }
     }
 }

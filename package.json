@@ -1,10 +1,10 @@
 {
   "name": "com.kylin.di",
-  "version": "1.1.5",
+  "version": "1.2.0",
   "displayName": "KDI (Kylin Dependency Injection)",
   "description": "Scope-based dependency injection framework for Unity 6. Field injection only, hierarchical scopes.",
   "unity": "6000.0",
-  "documentationUrl": "",
+  "documentationUrl": "https://github.com/ToolStorage/KDI#readme",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -21,5 +21,12 @@
   },
   "dependencies": {
     "com.kylin.subscribable": "1.0.3"
-  }
+  },
+  "samples": [
+    {
+      "displayName": "Unit Spawn",
+      "description": "등록(ToSelf/FromInstance), 필드 주입, IInstantiator를 통한 동적 유닛 생성 기본 예제",
+      "path": "Samples~/UnitSpawn"
+    }
+  ]
 }

@@ -37,7 +37,7 @@ com.kylin.di | Unity 6000.0+ | MIT License
 Unity Package Manager에서 Git URL로 추가:
 
 ```
-https://github.com/user/KDIPackage.git
+https://github.com/ToolStorage/KDI.git
 ```
 
 또는 `Packages/manifest.json`에 직접 추가:
@@ -45,10 +45,14 @@ https://github.com/user/KDIPackage.git
 ```json
 {
   "dependencies": {
-    "com.kylin.di": "https://github.com/user/KDIPackage.git"
+    "com.kylin.di": "https://github.com/ToolStorage/KDI.git"
   }
 }
 ```
+
+의존성 `com.kylin.subscribable`(SubscribableProperty 반응형 시스템)이 함께 설치된다.
+
+기본 사용 예제는 Package Manager → KDI → Samples → **Unit Spawn**에서 임포트할 수 있다.
 
 ---
 
@@ -201,7 +205,7 @@ public class BattleSceneScope : LifetimeScope
 }
 ```
 
-`_parent`가 `null`인 LifetimeScope는 **RootScope**로 동작하며, `KDI.RootScope`에 자동 등록된다.
+`_parent`가 `null`인 LifetimeScope는 **RootScope**로 동작하며, 프레임워크 내부의 RootScope 참조로 자동 등록된다 (외부에서 직접 접근하는 API는 제공하지 않는다 — 전역 Resolve 진입점은 서비스 로케이터가 되기 때문).
 
 `_autoInitialize`(기본값 `true`)를 `false`로 설정하면 `Awake`에서 자동 초기화하지 않고, 수동으로 `Initialize()`를 호출해야 한다. parent가 아직 초기화되지 않은 경우 자동으로 parent를 먼저 초기화한다.
 
@@ -263,7 +267,10 @@ protected override void Configure(ScopeBuilder builder)
     builder.Bind<IService>().To<ServiceImpl>().AsSingleton();   // RootScope에서만
     builder.Bind<IService>().To<ServiceImpl>().AsTransient();
 
-    // 기존 인스턴스 등록 (항상 Scoped 취급)
+    // 자기 바인딩 — 구체 타입 그대로 주입받을 때 (예: KDILayered [OwnerOnly] 패턴)
+    builder.Bind<PlayerData>().ToSelf().AsScoped();
+
+    // 기존 인스턴스 등록 (항상 Scoped 취급, Build 시점에 즉시 주입됨)
     builder.Bind<IService>().FromInstance(existingInstance);
 
     // 팩토리 등록 — 복잡한 생성 로직이 필요할 때
@@ -276,6 +283,16 @@ protected override void Configure(ScopeBuilder builder)
 
 `To<T>()`의 타입 제약: `T`는 반드시 `IDependencyObject`와 바인딩 인터페이스를 동시에 구현해야 한다.
 
+**Build 타임 검증** — 아래 실수는 조용히 넘어가지 않고 `Build()`(= LifetimeScope 초기화) 시점에 즉시 에러가 된다:
+
+| 실수 | 결과 |
+|------|------|
+| `.AsScoped()` 등 종결 메서드 누락 (`Bind().To()`까지만 작성) | Build 에러 |
+| 같은 스코프에 같은 서비스 타입 중복 등록 | Build 에러 (오버라이드는 자식 스코프에서) |
+| child scope에 `AsSingleton()` 등록 | Build 에러 |
+| Transient + `IUpdatable` 계열 조합 | Build 에러 (아래 Lifetime 규칙 참고) |
+| Transient + `IDisposable` 조합 | 경고 (Dispose는 생성한 쪽 책임) |
+
 ### Lifetime 규칙
 
 | Lifetime | 동작 | 등록 위치 |
@@ -286,6 +303,8 @@ protected override void Configure(ScopeBuilder builder)
 | `FromInstance()` | 이미 생성된 인스턴스 등록 | 모든 Scope (Scoped로 처리) |
 
 **Singleton을 RootScope에서만 허용하는 이유**: child scope에서 Singleton을 등록하면, scope 파괴 시 인스턴스도 파괴되어 "Singleton"이라는 의미와 모순된다. `ScopeBuilder.Build()` 시점에 parent가 존재하면 Singleton 등록을 차단하여 이 혼란을 원천 방지한다.
+
+**Transient + IUpdatable을 금지하는 이유**: Transient 인스턴스는 스코프가 수명을 추적하지 않으므로, Update 루프에 등록되면 스코프 파괴 후에도 영원히 호출되는 누수가 된다. 유닛처럼 다수 인스턴스에 매 프레임 로직이 필요하면 ① 유닛을 프리팹 + `DIBehaviour`로 만들거나(Unity Update 사용), ② Scoped `IUpdatable` 매니저 하나가 유닛 상태 목록을 순회하는 구조를 권장한다.
 
 **Scope Freeze**: `Build()` 이후에는 `ScopeBuilder`에 추가 등록이 불가능하다. 런타임 중 등록 변경으로 인한 추적 불가 버그를 방지한다.
 
@@ -315,7 +334,9 @@ protected override void Configure(ScopeBuilder builder)
 }
 ```
 
-**팩토리에서 Scope를 활용한 동적 생성 패턴**:
+**팩토리에서의 동적 생성 — `IInstantiator` 주입**:
+
+`IScope`는 직접 주입할 수 없다 — 임의 타입을 `Resolve`할 수 있게 되어 서비스 로케이터 안티패턴이 되기 때문이다. 대신 **Resolve 권한 없는 생성 전용 인터페이스 `IInstantiator`**가 모든 스코프에 자동 등록되어 있어 `[Inject]`로 주입받을 수 있다:
 
 ```csharp
 public interface IEnemyFactory : IDependencyObject
@@ -325,29 +346,18 @@ public interface IEnemyFactory : IDependencyObject
 
 public class EnemyFactory : IEnemyFactory, IInjectable
 {
-    [Inject] private IScope _scope;  // 불가 — IScope는 직접 주입 불가
-
-    // 대신 DIBehaviour에서 Scope 프로퍼티를 사용하거나,
-    // 팩토리 생성 시 scope를 주입한다:
-    private readonly IScope _scope;
-
-    public EnemyFactory(IScope scope)  // FromFactory에서 전달
-    {
-        _scope = scope;
-    }
+    [Inject] private IInstantiator _instantiator;   // 생성 능력만 주입 — Resolve 불가
 
     public GameObject Create(EnemyType type, Vector3 position)
     {
         var prefab = LoadPrefab(type);
-        // Scope.Instantiate로 프리팹 생성 + DI 주입
-        return _scope.Instantiate(prefab, position, Quaternion.identity);
+        // 프리팹 생성 + 하위 IInjectable 자동 주입
+        return _instantiator.Instantiate(prefab, position, Quaternion.identity);
     }
 }
 
-// 등록
-builder.Bind<IEnemyFactory>().FromFactory(scope => {
-    return new EnemyFactory(scope);
-}).AsScoped();
+// 등록 — 일반 바인딩과 동일. FromFactory로 scope를 꿰어줄 필요가 없다
+builder.Bind<IEnemyFactory>().To<EnemyFactory>().AsScoped();
 ```
 
 ---
@@ -387,6 +397,24 @@ scope.InjectGameObject(existingGameObject);              // 기존 오브젝트�
 ```
 
 `DIBehaviour`의 `Scope` 프로퍼티는 Push 주입 시 자동으로 설정된다. 동적 생성된 오브젝트도 `Scope.Instantiate()`를 통하면 내부의 `DIBehaviour`에 Scope가 올바르게 설정된다.
+
+MonoBehaviour가 아닌 순수 C# 클래스(팩토리, 서비스)에서는 `Scope` 프로퍼티 대신 `[Inject] IInstantiator`를 사용한다 (위 [팩토리 등록](#팩토리-등록) 참고).
+
+### 늦게 생성되는 오브젝트 — "만드는 쪽이 주입한다"
+
+Push 주입은 `LifetimeScope` 초기화 시점에 한 번 실행된다. 그 이후에 등장하는 오브젝트(additive 씬 로드, 런타임 조립 등)는 **받는 쪽이 스스로 주입을 당겨오지 않고, 그것을 만든/로드한 쪽이 주입한다**:
+
+```csharp
+// additive 씬 로드 — 로드한 쪽이 씬 루트에 주입
+var op = SceneManager.LoadSceneAsync("BattleUI", LoadSceneMode.Additive);
+op.completed += _ =>
+{
+    foreach (var root in SceneManager.GetSceneByName("BattleUI").GetRootGameObjects())
+        Scope.InjectGameObject(root);   // DIBehaviour/LifetimeScope가 쥔 Scope에서 호출
+};
+```
+
+객체가 전역에서 스코프를 찾아 셀프 주입하는 방식은 지원하지 않는다 — 잘못된 하이어라키 배치가 조용히 가려지고, Push 모델의 "주입 시점이 결정적"이라는 보장이 깨지기 때문이다.
 
 ---
 
@@ -573,7 +601,29 @@ attackCommand.CanExecute
 
 ## 디버그 도구
 
-### Closure Profiler (에디터 전용)
+### LifetimeScope 인스펙터 (에디터 전용)
+
+`LifetimeScope` 컴포넌트를 선택하면 Play 모드에서 스코프 내부가 표시된다:
+
+```
+▼ Battle Scope (Script)
+    Parent          AppRootScope
+    Registrations (3)
+      IUnitCatalog   → UnitCatalog    Scoped   ● resolved
+      ISpawnUnitApp  → SpawnUnitApp   Scoped   ● resolved
+      ISpawnVM       → SpawnVM        Scoped   ○ not yet
+```
+
+등록 목록, Lifetime, Resolve 여부를 실시간으로 확인할 수 있어 "왜 주입이 안 되지?"를 코드 없이 진단할 수 있다.
+
+또한 Resolve 실패와 순환참조 에러 메시지에 **스코프 체인**이 포함된다:
+
+```
+[KDI] BattleScope → AppRootScope 체인에서 IUnitCatalog 등록을 찾을 수 없습니다.
+[KDI] (BattleScope) 순환참조 발생: IUnitDomain → IUnitRepository → IUnitDomain
+```
+
+### Closure Profiler (에디터 전용, `com.kylin.subscribable` 패키지 포함)
 
 `SubscribableProperty` 구독 시 생성되는 클로저의 메모리 캡처를 분석하는 에디터 윈도우. 메모리 누수 진단에 유용하다.
 

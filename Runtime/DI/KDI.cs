@@ -7,25 +7,26 @@ namespace Kylin.DI
     ///
     /// 사용 패턴:
     /// 1. 서비스 등록: LifetimeScope 상속 클래스에서 Configure(ScopeBuilder builder)에서 등록
-    /// 2. 서비스 해결: this.Inject(scope) 또는 scope.Resolve() 사용
-    /// 3. 자동 주입 (권장): [Inject] 어트리뷰트 + DIBehaviour
+    /// 2. 자동 주입 (권장): [Inject] 어트리뷰트 + DIBehaviour
+    /// 3. 동적 생성: [Inject] IInstantiator 또는 DIBehaviour.Scope.Instantiate()
     /// </summary>
     public static class KDI
     {
         private static IScope _rootScope;
 
         /// <summary>
-        /// RootScope 접근점.
+        /// RootScope 접근점 (프레임워크 내부 전용).
+        /// public으로 열면 어디서든 Resolve가 가능한 서비스 로케이터가 되므로 internal로 제한한다.
         /// parent가 없는 LifetimeScope가 Initialize()할 때 자동 설정됨.
         /// </summary>
-        public static IScope RootScope
+        internal static IScope RootScope
         {
             get
             {
                 if (_rootScope == null)
                 {
                     Debug.LogWarning("[KDI] RootScope가 설정되지 않았습니다. 빈 RootScope를 자동 생성합니다.");
-                    _rootScope = new ScopeBuilder().Build(parent: null);
+                    _rootScope = new ScopeBuilder().Build(parent: null, name: "AutoRootScope");
                 }
                 return _rootScope;
             }
