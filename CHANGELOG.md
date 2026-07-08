@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.4.0] - 2026-07-08
+
+### Changed
+- 인스턴스 생성 방식을 `Expression.Lambda.Compile()`에서 **등록 시점 캡처 델리게이트**로 교체. `To<TImpl>()`은 `() => new TImpl()`을 정적으로 캡처하고, `ToSelf()`는 파라미터 없는 생성자를 등록 시점에 검증한 뒤 `Activator.CreateInstance`로 폴백한다. 표현식 컴파일(JIT)·`System.Linq.Expressions` 의존성이 제거되어 **IL2CPP(AOT) 환경에서 안정적이고 코드 스트리핑 영향을 받지 않는다** (모바일 빌드 대응). `InstanceFactory` 클래스 삭제
+- `Bind<T>().To<TImpl>()`에 **`new()` 제약 추가** — 파라미터 없는 public 생성자 누락이 런타임 `Resolve` 예외 대신 **컴파일 타임 에러**로 드러난다. 생성자 인자가 필요한 타입은 종전대로 `FromInstance()`/`FromFactory()`로 등록 (필드 주입 설계상 이미 지켜지던 계약이므로 정상 코드에는 영향 없음)
+
 ## [1.3.0] - 2026-07-07
 
 ### Added

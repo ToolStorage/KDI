@@ -680,7 +680,7 @@ attackCommand.CanExecute
 |------|-----------|---------|-----|
 | **주입 방식** | 생성자 + 메서드 + 필드 | 생성자 + 메서드 + 필드 + 프로퍼티 | **필드 전용** |
 | **Scope 모델** | LifetimeScope 계층 | Context 계층 | LifetimeScope 계층 |
-| **인스턴스 생성** | IL Emit / Source Generator | Reflection + 캐시 | `Expression.Compile` 캐시 |
+| **인스턴스 생성** | IL Emit / Source Generator | Reflection + 캐시 | 등록 시 캡처된 `new()` 델리게이트 (AOT 안전) |
 | **순환 참조 감지** | 있음 | 있음 | 있음 (`ThreadStatic`) |
 | **Update 루프** | ITickable 등 | ITickable 등 | IKDIUpdatable 등 |
 | **반응형 시스템** | 없음 (외부 R3 필요) | 없음 (외부 UniRx 필요) | **내장** (SubscribableProperty) |
@@ -693,7 +693,7 @@ KDI는 **의도적으로 생성자 주입을 지원하지 않는다.** 이것은
 
 1. **Unity 호환성**: `MonoBehaviour`는 생성자를 사용할 수 없다. 필드 주입으로 통일하면 MonoBehaviour든 순수 C# 클래스든 **동일한 패턴**으로 DI를 사용한다. "이 클래스는 생성자 주입, 저 클래스는 필드 주입"이라는 혼란이 없다.
 
-2. **고속 인스턴스 생성**: 모든 DI 관리 타입이 파라미터 없는 생성자를 가지므로, `Expression.Lambda.Compile()` 기반 고속 팩토리 캐시가 가능하다. 생성자 인자 해석 오버헤드가 없다.
+2. **고속·안정 인스턴스 생성**: 모든 DI 관리 타입이 파라미터 없는 생성자를 가지므로, `To<TImpl>()` 등록 시점에 `() => new TImpl()` 델리게이트를 정적으로 캡처한다. 표현식 컴파일(JIT)·리플렉션이 없어 IL2CPP(AOT)에서 안정적이고 코드 스트리핑 영향을 받지 않으며, 생성자 인자 해석 오버헤드도 없다. (`new()` 제약 덕에 파라미터 없는 생성자 누락은 컴파일 타임에 잡힌다.)
 
 3. **학습 비용 최소화**: `[Inject]`를 필드에 붙이면 끝. 팩토리 메서드 시그니처, 생성자 파라미터 순서, `[Inject]` vs 생성자 선택 고민이 없다.
 

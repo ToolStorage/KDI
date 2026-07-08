@@ -217,7 +217,7 @@ namespace Kylin.DI
             }
             else
             {
-                instance = InstanceFactory.Create(registration.ImplementationType);
+                instance = registration.Activator();
             }
 
             // 타입 기반 Transient+IUpdatable은 빌드 타임에 차단되지만,

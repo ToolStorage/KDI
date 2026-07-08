@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 
 namespace Kylin.DI
 {
@@ -21,6 +22,7 @@ namespace Kylin.DI
         private Lifetime _lifetime = Lifetime.Singleton;
         private object _instance;
         private Func<IScope, object> _factory;
+        private Func<object> _activator;
         private bool _isEntryPoint;
         private bool _isCompleted;
 
@@ -37,9 +39,10 @@ namespace Kylin.DI
         /// 구현타입 지정
         /// </summary>
         public DependencyBuilder<T> To<TImplementation>()
-            where TImplementation : IDependencyObject, T
+            where TImplementation : IDependencyObject, T, new()
         {
             _implementationType = typeof(TImplementation);
+            _activator = () => new TImplementation();
             return this;
         }
 
@@ -61,7 +64,21 @@ namespace Kylin.DI
                     $"[KDI] {typeof(T).Name}은(는) IDependencyObject를 구현해야 합니다.");
             }
 
-            _implementationType = typeof(T);
+            var implType = typeof(T);
+
+            // ToSelf는 클래스 레벨 T(new() 제약 불가)를 쓰므로 컴파일 타임 검증이 불가능하다.
+            // 등록 시점에 public 파라미터 없는 생성자 존재를 검사해 fail-fast를 유지한다.
+            var ctor = implType.GetConstructor(
+                BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+            if (ctor == null)
+            {
+                throw new InvalidOperationException(
+                    $"[KDI] {implType.Name}에 public 파라미터 없는 생성자가 없습니다. " +
+                    "생성자 인자가 필요한 타입은 FromInstance() 또는 FromFactory()로 등록하세요.");
+            }
+
+            _implementationType = implType;
+            _activator = () => System.Activator.CreateInstance(implType);
             return this;
         }
 
@@ -178,6 +195,7 @@ namespace Kylin.DI
                 {
                     ServiceType = _serviceType,
                     ImplementationType = _implementationType,
+                    Activator = _activator,
                     Lifetime = _lifetime,
                     AliasTypes = aliases,
                     IsEntryPoint = _isEntryPoint

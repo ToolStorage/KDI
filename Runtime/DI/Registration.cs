@@ -26,6 +26,8 @@ namespace Kylin.DI
         public Lifetime Lifetime { get; set; }
         public Func<IScope, object> Factory { get; set; }
 
+        public Func<object> Activator { get; set; }
+
         /// <summary>
         /// AlsoBind로 지정된 추가 서비스 타입들. 이 타입들은 ServiceType과 동일한 단일 인스턴스를 공유한다.
         /// </summary>
