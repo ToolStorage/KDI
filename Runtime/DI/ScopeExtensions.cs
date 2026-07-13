@@ -16,13 +16,28 @@ namespace Kylin.DI
         {
             if (scope == null || gameObject == null) return;
 
-            var injectables = gameObject.GetComponentsInChildren<IInjectable>(true);
+            InjectHierarchy(scope, gameObject.transform);
+        }
+
+        private static void InjectHierarchy(IScope scope, Transform current)
+        {
+            if (current == null) return;
+
+            if (current.TryGetComponent<LifetimeScope>(out _))
+                return;
+
+            var injectables = current.GetComponents<IInjectable>();
             foreach (var injectable in injectables)
             {
                 DependencyInjector.Inject(injectable, scope);
 
                 if (injectable is DIBehaviour dib)
                     dib.SetInjected(scope);
+            }
+
+            for (int i = 0; i < current.childCount; i++)
+            {
+                InjectHierarchy(scope, current.GetChild(i));
             }
         }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace Kylin.DI
@@ -89,14 +90,14 @@ namespace Kylin.DI
         {
             var seen = new HashSet<Registration>();
 
-            // 1) 먼저 전부 캐시에 올려 인스턴스끼리 서로 주입받을 수 있게 한다
+            // 먼저 전부 캐시에 올려 인스턴스끼리 서로 주입받을 수 있게 한다
             foreach (var reg in _registrations.Values)
             {
                 if (reg.Instance == null || !seen.Add(reg)) continue;
                 CacheInstance(reg, reg.Instance);
             }
 
-            // 2) 주입 + Update 루프 등록
+            // 주입 + Update 루프 등록
             seen.Clear();
             foreach (var reg in _registrations.Values)
             {
@@ -315,8 +316,12 @@ namespace Kylin.DI
                 child.Dispose();
             }
 
+            var disposedInstances = new HashSet<object>(ReferenceEqualityComparer.Instance);
             foreach (var instance in _instances.Values)
             {
+                if (instance == null || !disposedInstances.Add(instance))
+                    continue;
+
                 if (instance is IDisposable disposable)
                 {
                     try { disposable.Dispose(); }
@@ -330,6 +335,15 @@ namespace Kylin.DI
                 }
             }
             _instances.Clear();
+        }
+
+        private sealed class ReferenceEqualityComparer : IEqualityComparer<object>
+        {
+            public static readonly ReferenceEqualityComparer Instance = new();
+
+            public new bool Equals(object x, object y) => ReferenceEquals(x, y);
+
+            public int GetHashCode(object obj) => RuntimeHelpers.GetHashCode(obj);
         }
     }
 }
