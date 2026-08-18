@@ -21,7 +21,7 @@ namespace Kylin.DI
         private Type _implementationType;
         private Lifetime _lifetime = Lifetime.Singleton;
         private object _instance;
-        private Func<IScope, object> _factory;
+        private Func<object> _factory;
         private Func<object> _activator;
         private bool _isEntryPoint;
         private bool _isCompleted;
@@ -111,6 +111,7 @@ namespace Kylin.DI
 
         public void FromInstance(T instance)
         {
+            if (instance == null) throw new ArgumentNullException(nameof(instance));
             if (instance is IDependencyObject)
             {
                 _instance = instance;
@@ -126,9 +127,10 @@ namespace Kylin.DI
         /// <summary>
         /// 팩토리 등록
         /// </summary>
-        public DependencyBuilder<T> FromFactory(Func<IScope, T> factory)
+        public DependencyBuilder<T> FromFactory(Func<T> factory)
         {
-            _factory = scope => factory(scope);
+            if (factory == null) throw new ArgumentNullException(nameof(factory));
+            _factory = () => factory();
             return this;
         }
 

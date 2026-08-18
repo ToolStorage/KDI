@@ -1,231 +1,500 @@
+using System;
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace Kylin.DI
 {
+    public enum RootScopeMode
+    {
+        Primary,
+        Isolated
+    }
+
     /// <summary>
-    /// 스코프 기반 의존성 관리를 위한 추상 MonoBehaviour.
-    /// Initialize() 시 하위 계층의 IInjectable MonoBehaviour에 일괄 주입 (Push).
-    /// child LifetimeScope 경계에서 탐색 중단 (하위 스코프의 주입 영역 침범 방지).
-    ///
-    /// 사용 방법:
-    /// 1. 이 클래스를 상속받은 클래스 생성
-    /// 2. Configure(ScopeBuilder builder)에서 builder.Bind 등으로 서비스 등록
-    /// 3. 씬에 해당 컴포넌트를 하나 배치
-    ///
-    /// 예시:
-    /// <code>
-    /// public class BattleSceneScope : LifetimeScope
-    /// {
-    ///     protected override void Configure(ScopeBuilder builder)
-    ///     {
-    ///         builder.Bind&lt;IBattleService&gt;().To&lt;BattleService&gt;().AsScoped();
-    ///     }
-    /// }
-    /// </code>
+    /// Scene hierarchy scope. Dependencies are pushed into IInjectable components;
+    /// child LifetimeScope objects remain injection boundaries.
     /// </summary>
+    [DefaultExecutionOrder(-10000)]
     public abstract class LifetimeScope : MonoBehaviour
     {
-        // === Static Registry ===
-        private static readonly List<LifetimeScope> _activeScopes = new();
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetStatic()
+        private enum LifetimeScopeState
         {
-            _activeScopes.Clear();
+            Inactive,
+            Initializing,
+            Active,
+            Disposing
         }
 
-        // === Inspector Fields ===
+        private static readonly List<LifetimeScope> _activeScopes = new();
+        private static readonly List<LifetimeScope> _cascadeRestartScopes = new();
+
+        internal static void ResetStatic()
+        {
+            if (_activeScopes.Count > 0)
+            {
+                var staleScopes = _activeScopes.ToArray();
+                for (var i = staleScopes.Length - 1; i >= 0; i--)
+                {
+                    var stale = staleScopes[i];
+                    if (stale == null) continue;
+                    try
+                    {
+                        // Stop behaviours while their previous-session injected fields
+                        // are still available, then revoke the stale graph.
+                        if (stale.gameObject != null && stale.gameObject.activeSelf)
+                            stale.gameObject.SetActive(false);
+                        stale.Dispose();
+                    }
+                    catch (Exception exception) { Debug.LogException(exception, stale); }
+                }
+                Debug.LogWarning(
+                    "[KDI] Live LifetimeScopes survived SubsystemRegistration. They were disposed/deactivated " +
+                    "to prevent stale injection state. Disable the simultaneous Domain Reload + Scene Reload " +
+                    "override, or reinitialize the scopes explicitly from an editor bootstrap.");
+            }
+            _activeScopes.Clear();
+            _cascadeRestartScopes.Clear();
+            SceneManager.sceneLoaded -= ValidateLoadedScene;
+            SceneManager.sceneLoaded += ValidateLoadedScene;
+        }
 
         [Header("Scope Hierarchy")]
         [SerializeField]
-        [Tooltip("부모 LifetimeScope. 없으면 RootScope로 생성됨.")]
+        [Tooltip("Parent LifetimeScope. When empty, this scope becomes the single primary RootScope.")]
         private LifetimeScope _parent;
 
         [SerializeField]
-        [Tooltip("true면 Awake에서 자동 초기화, false면 수동으로 Initialize() 호출 필요")]
+        [Tooltip("When enabled, Initialize is called from Awake.")]
         private bool _autoInitialize = true;
 
-        // === Instance State ===
+        [SerializeField]
+        [Tooltip("Parentless scopes are Primary by default. Use Isolated for additive-scene or preview contexts that must not replace the app root.")]
+        private RootScopeMode _rootMode = RootScopeMode.Primary;
 
         private IScope _scope;
-        private bool _isInitialized;
+        private IScope _runtimeParentScope;
+        private LifetimeScope _runtimeParent;
+        private LifetimeScopeState _state;
         private int _hierarchyDepth;
+        private bool _restartAfterCascade;
+        private bool _reactivateAfterCascade;
+        private bool _isDestroying;
+        private bool _wasActiveBeforeScopeDisposal;
 
-        /// <summary>
-        /// 이 LifetimeScope의 IScope.
-        /// </summary>
         public IScope Scope => _scope;
+        public bool IsInitialized => _state == LifetimeScopeState.Active;
 
-        /// <summary>
-        /// 초기화 완료 여부
-        /// </summary>
-        public bool IsInitialized => _isInitialized;
-
-        #region Unity Lifecycle
-
-        protected virtual void Awake()
+        protected void Awake()
         {
             if (_autoInitialize)
-            {
                 Initialize();
+        }
+
+        protected void OnDestroy()
+        {
+            _isDestroying = true;
+            CancelCascadeRestart();
+            try
+            {
+                // Unity destruction is not a user-requested Dispose. If it occurs from
+                // Configure/PostInject/factory code, defer the concrete graph cleanup
+                // through the ambient transaction before public state guards run.
+                if (_scope is Scope concreteScope && concreteScope.DeferDisposalForDestroyedLifetimeScope())
+                {
+                    _state = LifetimeScopeState.Disposing;
+                    return;
+                }
+                if (_state == LifetimeScopeState.Initializing && _scope == null)
+                {
+                    _state = LifetimeScopeState.Inactive;
+                    return;
+                }
+                Dispose();
+            }
+            finally
+            {
+                // HandleScopeDisposed runs inside Dispose and must never leave a
+                // destroyed Unity wrapper rooted in a static restart queue.
+                CancelCascadeRestart();
+                _activeScopes.Remove(this);
             }
         }
 
-        protected virtual void OnDestroy()
-        {
-            Dispose();
-        }
-
-        #endregion
-
-        #region Public API
-
-        /// <summary>
-        /// 수동 초기화.
-        /// _autoInitialize가 false일 때 사용.
-        /// </summary>
         public void Initialize()
         {
-            if (_isInitialized)
-            {
-                Debug.LogWarning($"[LifetimeScope] {GetType().Name} is already initialized.");
+            KDI.EnsureMainThread();
+            ActivationCallbackGuard.ThrowIfConfigureMutation("LifetimeScope.Initialize");
+            if (_state == LifetimeScopeState.Active)
                 return;
+            if (_state == LifetimeScopeState.Initializing)
+                throw new InvalidOperationException(
+                    $"[KDI] LifetimeScope parent cycle detected while initializing {GetType().Name}.");
+            if (_state == LifetimeScopeState.Disposing)
+                throw new InvalidOperationException($"[KDI] {GetType().Name} is currently disposing.");
+
+            var wasActiveAtStart = gameObject != null && gameObject.activeSelf;
+            var restartingAfterCascade = _restartAfterCascade;
+            var reactivateAfterInitialize = _reactivateAfterCascade;
+            var wasPendingCascadeRestart = false;
+            if (restartingAfterCascade)
+            {
+                wasPendingCascadeRestart = _cascadeRestartScopes.Remove(this);
+                _restartAfterCascade = false;
+                _reactivateAfterCascade = false;
             }
 
-            var builder = new ScopeBuilder();
-            Configure(builder);
-
-            if (_parent != null)
+            _state = LifetimeScopeState.Initializing;
+            try
             {
-                if (!_parent.IsInitialized)
+                ValidateLifecycleMessages();
+                if (ReferenceEquals(_parent, this))
+                    throw new InvalidOperationException($"[KDI] {GetType().Name} cannot be its own parent.");
+                if (ReferenceEquals(_runtimeParent, this))
+                    throw new InvalidOperationException($"[KDI] {GetType().Name} cannot be its own runtime parent.");
+
+                IScope parentScope = null;
+                if (_parent != null)
                 {
-                    _parent.Initialize();
+                    if (!_parent.IsInitialized)
+                        _parent.Initialize();
+                    parentScope = _parent.Scope;
                 }
-                _scope = builder.Build(_parent.Scope, GetType().Name);
+                else if (_runtimeParent != null)
+                {
+                    if (!_runtimeParent.IsInitialized)
+                        _runtimeParent.Initialize();
+                    parentScope = _runtimeParent.Scope;
+                    _runtimeParentScope = parentScope;
+                }
+                else if (_runtimeParentScope != null)
+                {
+                    if (_runtimeParentScope is Scope concreteParent && concreteParent.IsDisposed)
+                        throw new ObjectDisposedException(concreteParent.Name);
+                    parentScope = _runtimeParentScope;
+                }
+
+                var builder = new ScopeBuilder();
+                using (ActivationCallbackGuard.EnterConfigure())
+                {
+                    Configure(builder);
+                }
+                if (this == null || gameObject == null)
+                    throw new InvalidOperationException(
+                        $"[KDI] {GetType().Name} destroyed its GameObject during Configure.");
+                _scope = builder.Build(parentScope, GetType().Name);
+
+                if (_scope is Scope concreteScope)
+                {
+                    concreteScope.ScopeDisposing += HandleScopeDisposing;
+                    concreteScope.ScopeDisposed += HandleScopeDisposed;
+                }
+
+                if (_parent == null && _runtimeParent == null && _runtimeParentScope == null &&
+                    _rootMode == RootScopeMode.Primary)
+                    KDI.SetRootScope(_scope);
+
+                _hierarchyDepth = ComputeDepth(transform);
+                _activeScopes.Add(this);
+
+                // The concrete Scope tracks every successful push-injection lease.
+                // If a later component fails, disposing the scope revokes the earlier ones.
+                InjectSelf();
+                InjectChildren();
+
+                _state = LifetimeScopeState.Active;
+                RestartCascadeChildren();
+                if (restartingAfterCascade && reactivateAfterInitialize && !gameObject.activeSelf)
+                    gameObject.SetActive(true);
+                Debug.Log($"[LifetimeScope] {GetType().Name} initialized.");
             }
-            else
+            catch (Exception initializationException)
             {
-                // parent가 없으면 RootScope로 빌드
-                _scope = builder.Build(parent: null, name: GetType().Name);
-                KDI.SetRootScope(_scope);
+                // Awake exceptions are not a reliable control-flow signal to the code
+                // that called GameObject.SetActive. Preserve the first KDI lifecycle
+                // failure in the surrounding prefab activation attempt explicitly.
+                UnityActivationAttempt.ReportFailure(this, initializationException);
+                // Stop enabled behaviours before revoking their fields. This keeps the
+                // failed object graph from running and lets OnDisable observe the still
+                // injected state when activation reached that far.
+                if (wasActiveAtStart && this != null && gameObject != null && gameObject.activeSelf)
+                    gameObject.SetActive(false);
+
+                _activeScopes.Remove(this);
+                var failedScope = _scope;
+                KDI.ClearRootScope(failedScope);
+                _state = LifetimeScopeState.Disposing;
+                try { failedScope?.Dispose(); }
+                catch (Exception disposeException) { Debug.LogException(disposeException); }
+                _scope = null;
+                _state = LifetimeScopeState.Inactive;
+                if (restartingAfterCascade || wasActiveAtStart)
+                {
+                    _restartAfterCascade = true;
+                    _reactivateAfterCascade = reactivateAfterInitialize || wasActiveAtStart;
+                    if (wasPendingCascadeRestart && !_cascadeRestartScopes.Contains(this))
+                        _cascadeRestartScopes.Add(this);
+                }
+                throw;
             }
-
-            // static registry 등록
-            _hierarchyDepth = ComputeDepth(transform);
-            _activeScopes.Add(this);
-
-            _isInitialized = true;
-
-            // 자기 GameObject의 IInjectable 주입 — 부모 스코프는 이 GO를 경계로 보고 건너뛰므로
-            // 여기서 주입하지 않으면 아무도 주입해주지 않는다
-            InjectSelf();
-
-            // 하위 계층 IInjectable 일괄 주입 (Push)
-            InjectChildren();
-
-            Debug.Log($"[LifetimeScope] {GetType().Name} initialized.");
         }
 
-        /// <summary>
-        /// 스코프 정리.
-        /// OnDestroy에서 자동 호출됨.
-        /// </summary>
         public void Dispose()
         {
-            if (!_isInitialized)
+            KDI.EnsureMainThread();
+            if (!_isDestroying)
+                ActivationCallbackGuard.ThrowIfConfigureMutation("LifetimeScope.Dispose");
+            if (_state == LifetimeScopeState.Inactive)
+            {
+                CancelCascadeRestart();
+                return;
+            }
+            if (_state == LifetimeScopeState.Initializing)
+                throw new InvalidOperationException(
+                    $"[KDI] {GetType().Name} cannot be disposed while Initialize/Configure is still running.");
+            if (_state == LifetimeScopeState.Disposing)
                 return;
 
-            _activeScopes.Remove(this);
-            _scope?.Dispose();
-            _scope = null;
-            _isInitialized = false;
+            var deactivateAfterDispose = !_isDestroying && gameObject != null && gameObject.activeSelf;
+            var previousState = _state;
+            _state = LifetimeScopeState.Disposing;
+            var currentScope = _scope;
+            if (currentScope == null)
+            {
+                HandleScopeDisposed(null);
+                return;
+            }
 
+            try
+            {
+                if (_isDestroying && currentScope is Scope concreteScope &&
+                    concreteScope.DeferDisposalForDestroyedLifetimeScope())
+                {
+                    return;
+                }
+                if (_isDestroying && currentScope is Scope destroyedOwnerScope)
+                    destroyedOwnerScope.DisposeFromDestroyedLifetimeScope();
+                else
+                    currentScope.Dispose();
+            }
+            catch
+            {
+                _state = previousState;
+                throw;
+            }
+            // Custom IScope implementations do not raise ScopeDisposed.
+            if (_scope != null)
+                HandleScopeDisposed(currentScope as Scope);
+
+            if (deactivateAfterDispose && this != null && gameObject != null)
+            {
+                _restartAfterCascade = true;
+                _reactivateAfterCascade = true;
+                gameObject.SetActive(false);
+            }
+        }
+
+        private void HandleScopeDisposed(Scope disposedScope)
+        {
+            if (disposedScope != null && !ReferenceEquals(_scope, disposedScope))
+                return;
+
+            if (_scope is Scope concreteScope)
+            {
+                concreteScope.ScopeDisposing -= HandleScopeDisposing;
+                concreteScope.ScopeDisposed -= HandleScopeDisposed;
+            }
+
+            var wasCascaded = _state == LifetimeScopeState.Active || _state == LifetimeScopeState.Initializing;
+            var oldScope = _scope;
+            _activeScopes.Remove(this);
+            KDI.ClearRootScope(oldScope);
+            _scope = null;
+            _state = LifetimeScopeState.Inactive;
+
+            if (wasCascaded && !_isDestroying && this != null && gameObject != null)
+            {
+                _restartAfterCascade = true;
+                _reactivateAfterCascade = _wasActiveBeforeScopeDisposal || gameObject.activeSelf;
+                if (!_cascadeRestartScopes.Contains(this))
+                    _cascadeRestartScopes.Add(this);
+                if (gameObject.activeSelf)
+                    gameObject.SetActive(false);
+            }
+            else if (_isDestroying)
+            {
+                CancelCascadeRestart();
+            }
+            _wasActiveBeforeScopeDisposal = false;
             Debug.Log($"[LifetimeScope] {GetType().Name} disposed.");
         }
 
-        #endregion
-
-        #region Push Injection
-
-        /// <summary>
-        /// 하위 계층의 IInjectable MonoBehaviour를 찾아 일괄 주입.
-        /// child LifetimeScope 경계에서 탐색을 중단하여 하위 스코프 영역을 침범하지 않는다.
-        /// </summary>
-        private void InjectChildren()
+        private void HandleScopeDisposing(Scope disposingScope)
         {
-            InjectHierarchy(transform);
+            if (!ReferenceEquals(_scope, disposingScope) || _isDestroying || this == null || gameObject == null)
+                return;
+
+            _wasActiveBeforeScopeDisposal = gameObject.activeSelf;
+            if (_wasActiveBeforeScopeDisposal)
+                gameObject.SetActive(false);
         }
 
-        /// <summary>
-        /// LifetimeScope 자신의 GameObject에 붙은 IInjectable 컴포넌트 주입.
-        /// </summary>
+        internal bool HasSerializedParent => _parent != null;
+
+        internal void PrepareRuntimeParent(IScope parentScope, LifetimeScope parentOwner)
+        {
+            KDI.EnsureMainThread();
+            ValidateLifecycleMessages();
+            if (_parent != null) return;
+            if (_state != LifetimeScopeState.Inactive)
+                throw new InvalidOperationException(
+                    $"[KDI] Runtime parent for {GetType().Name} must be assigned before initialization.");
+            if (parentScope == null && parentOwner == null)
+                throw new ArgumentNullException(nameof(parentScope));
+            if (ReferenceEquals(parentOwner, this))
+                throw new InvalidOperationException($"[KDI] {GetType().Name} cannot be its own runtime parent.");
+
+            _runtimeParent = parentOwner;
+            _runtimeParentScope = parentOwner != null && parentOwner.IsInitialized
+                ? parentOwner.Scope
+                : parentScope;
+        }
+
+        private static void ValidateLoadedScene(Scene scene, LoadSceneMode mode)
+        {
+            if (!scene.IsValid() || !scene.isLoaded) return;
+            var roots = scene.GetRootGameObjects();
+            for (var i = 0; i < roots.Length; i++)
+            {
+                var scopes = roots[i].GetComponentsInChildren<LifetimeScope>(true);
+                for (var j = 0; j < scopes.Length; j++)
+                {
+                    var scope = scopes[j];
+                    if (scope == null) continue;
+                    try { scope.ValidateLifecycleMessages(); }
+                    catch (Exception exception)
+                    {
+                        // A derived Awake can hide the framework Awake, so Initialize
+                        // never gets a chance to fail closed. Scene validation is the
+                        // runtime fallback: quarantine only the invalid hierarchy and
+                        // continue validating the rest of the loaded scene.
+                        if (scope.gameObject != null && scope.gameObject.activeSelf)
+                            scope.gameObject.SetActive(false);
+                        Debug.LogException(exception, scope);
+                    }
+                }
+            }
+        }
+
+        internal static LifetimeScope FindOwner(IScope scope)
+        {
+            for (var i = 0; i < _activeScopes.Count; i++)
+            {
+                var candidate = _activeScopes[i];
+                if (candidate != null && ReferenceEquals(candidate._scope, scope))
+                    return candidate;
+            }
+            return null;
+        }
+
+        private void RestartCascadeChildren()
+        {
+            if (_cascadeRestartScopes.Count == 0) return;
+            var snapshot = _cascadeRestartScopes.ToArray();
+            for (var i = 0; i < snapshot.Length; i++)
+            {
+                var child = snapshot[i];
+                if (child == null)
+                {
+                    _cascadeRestartScopes.Remove(child);
+                    continue;
+                }
+                if (!ReferenceEquals(child._parent, this) && !ReferenceEquals(child._runtimeParent, this))
+                    continue;
+
+                child._runtimeParentScope = _scope;
+                child.Initialize();
+            }
+        }
+
+        private void CancelCascadeRestart()
+        {
+            _cascadeRestartScopes.Remove(this);
+            _restartAfterCascade = false;
+            _reactivateAfterCascade = false;
+        }
+
+        private void ValidateLifecycleMessages()
+        {
+            for (var type = GetType(); type != null && type != typeof(LifetimeScope); type = type.BaseType)
+            {
+                const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public |
+                                           BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+                if (DeclaresParameterless(type, nameof(Awake), flags) ||
+                    DeclaresParameterless(type, nameof(OnDestroy), flags))
+                {
+                    throw new InvalidOperationException(
+                        $"[KDI] {type.FullName} declares Awake/OnDestroy and bypasses LifetimeScope lifecycle. " +
+                        "Use Configure and injected collaborators instead of Unity lifecycle messages on a LifetimeScope.");
+                }
+            }
+        }
+
+        private static bool DeclaresParameterless(Type type, string name, BindingFlags flags)
+        {
+            var methods = type.GetMember(name, MemberTypes.Method, flags);
+            for (var i = 0; i < methods.Length; i++)
+            {
+                if (methods[i] is MethodInfo method && method.GetParameters().Length == 0)
+                    return true;
+            }
+            return false;
+        }
+
         private void InjectSelf()
         {
             var injectables = GetComponents<IInjectable>();
             foreach (var injectable in injectables)
             {
                 if (injectable is LifetimeScope) continue;
-
-                DependencyInjector.Inject(injectable, _scope);
-
-                if (injectable is DIBehaviour dib)
-                    dib.SetInjected(_scope);
+                injectable.Inject(_scope);
             }
 
-            var behaviours = GetComponents<MonoBehaviour>();
-            foreach (var mb in behaviours)
-            {
-                if (mb == null || mb is IInjectable || mb is LifetimeScope) continue;
-                DependencyInjector.WarnIfHasInjectFieldsWithoutIInjectable(mb);
-            }
+            WarnNonInjectableComponents(gameObject);
         }
+
+        private void InjectChildren() => InjectHierarchy(transform);
 
         private void InjectHierarchy(Transform current)
         {
-            for (int i = 0; i < current.childCount; i++)
+            for (var i = 0; i < current.childCount; i++)
             {
                 var child = current.GetChild(i);
-
-                // child LifetimeScope가 있으면 탐색 중단 (그 scope의 영역)
                 if (child.TryGetComponent<LifetimeScope>(out _))
                     continue;
 
-                // 이 GameObject의 IInjectable 컴포넌트 주입
                 var injectables = child.GetComponents<IInjectable>();
                 foreach (var injectable in injectables)
-                {
-                    DependencyInjector.Inject(injectable, _scope);
+                    injectable.Inject(_scope);
 
-                    if (injectable is DIBehaviour dib)
-                        dib.SetInjected(_scope);
-                }
-
-                // [Inject] 필드가 있지만 IInjectable 미구현인 MonoBehaviour 경고
-                var behaviours = child.GetComponents<MonoBehaviour>();
-                foreach (var mb in behaviours)
-                {
-                    if (mb == null || mb is IInjectable) continue;
-                    DependencyInjector.WarnIfHasInjectFieldsWithoutIInjectable(mb);
-                }
-
-                // 재귀
+                WarnNonInjectableComponents(child.gameObject);
                 InjectHierarchy(child);
             }
         }
 
-        #endregion
+        private static void WarnNonInjectableComponents(GameObject target)
+        {
+            var behaviours = target.GetComponents<MonoBehaviour>();
+            foreach (var behaviour in behaviours)
+            {
+                if (behaviour == null || behaviour is IInjectable || behaviour is LifetimeScope) continue;
+                DependencyInjector.WarnIfHasInjectFieldsWithoutIInjectable(behaviour);
+            }
+        }
 
-        #region Static Helpers (Registry 기반)
-
-        /// <summary>
-        /// static registry에서 가장 가까운 LifetimeScope 찾기.
-        /// GetComponentInParent 대신 Transform.IsChildOf (네이티브 호출) 사용.
-        /// </summary>
         public static LifetimeScope Find(Transform from) => FindInternal(from);
-
         public static LifetimeScope Find(GameObject from) => FindInternal(from?.transform);
-
         public static LifetimeScope Find(Component from) => FindInternal(from?.transform);
 
         private static LifetimeScope FindInternal(Transform from)
@@ -233,60 +502,47 @@ namespace Kylin.DI
             if (from == null) return null;
 
             LifetimeScope best = null;
-            int bestDepth = -1;
-
-            for (int i = 0; i < _activeScopes.Count; i++)
+            var bestDepth = -1;
+            for (var i = 0; i < _activeScopes.Count; i++)
             {
                 var scope = _activeScopes[i];
-                if (scope == null || !scope._isInitialized) continue;
+                if (scope == null || scope._scope == null ||
+                    scope._state != LifetimeScopeState.Active && scope._state != LifetimeScopeState.Initializing)
+                    continue;
 
-                if (from.IsChildOf(scope.transform))
-                {
-                    if (scope._hierarchyDepth > bestDepth)
-                    {
-                        bestDepth = scope._hierarchyDepth;
-                        best = scope;
-                    }
-                }
+                if (!from.IsChildOf(scope.transform) || scope._hierarchyDepth <= bestDepth)
+                    continue;
+
+                bestDepth = scope._hierarchyDepth;
+                best = scope;
             }
-
             return best;
         }
 
-        /// <summary>
-        /// 씬에서 루트 LifetimeScope 찾기.
-        /// </summary>
         public static LifetimeScope FindRoot()
         {
-            for (int i = 0; i < _activeScopes.Count; i++)
+            for (var i = 0; i < _activeScopes.Count; i++)
             {
-                if (_activeScopes[i]._parent == null)
-                    return _activeScopes[i];
+                var scope = _activeScopes[i];
+                if (scope != null && scope._parent == null && scope._runtimeParent == null &&
+                    scope._runtimeParentScope == null && scope._rootMode == RootScopeMode.Primary &&
+                    scope._state == LifetimeScopeState.Active)
+                    return scope;
             }
             return null;
         }
 
-        private static int ComputeDepth(Transform t)
+        private static int ComputeDepth(Transform value)
         {
-            int depth = 0;
-            while (t.parent != null)
+            var depth = 0;
+            while (value.parent != null)
             {
                 depth++;
-                t = t.parent;
+                value = value.parent;
             }
             return depth;
         }
 
-        #endregion
-
-        #region Abstract
-
-        /// <summary>
-        /// 서비스 등록.
-        /// 하위 클래스에서 구현하여 builder.Bind 등으로 서비스 등록.
-        /// </summary>
         protected abstract void Configure(ScopeBuilder builder);
-
-        #endregion
     }
 }

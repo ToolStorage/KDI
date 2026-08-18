@@ -11,7 +11,7 @@ namespace Kylin.DI.Samples.UnitSpawn
         [Inject] private SpawnUnitService _spawner;
         [Inject] private GoldService _gold;
 
-        private void Start()
+        protected override void OnInjectedEnable()
         {
             _gold.Gold
                 .Subscribe(gold => Debug.Log($"[UnitSpawn] Gold: {gold}"), invokeInitial: true)

@@ -1,0 +1,20 @@
+# Development and CI metadata
+.github/
+.gitignore
+
+# Local AI/editor artifacts
+CLAUDE.md
+.claude/
+.omc/
+.cursor/
+.aider*
+.codex/
+
+# Build outputs
+*.tgz
+*.pdb
+*.deps.json
+
+# OS metadata
+.DS_Store
+Thumbs.db

@@ -18,13 +18,23 @@ namespace Kylin.DI
         void PostInject();
     }
 
+    /// <summary>
+    /// Releases resources acquired by PostInject when injection is revoked.
+    /// This callback can also run after PostInject started and then threw, so it must
+    /// tolerate partially initialized state and be idempotent.
+    /// </summary>
+    public interface IPreUninjectable
+    {
+        void PreUninject();
+    }
+
     public class Registration
     {
         public Type ServiceType { get; set; }
         public Type ImplementationType { get; set; }
         public object Instance { get; set; }
         public Lifetime Lifetime { get; set; }
-        public Func<IScope, object> Factory { get; set; }
+        public Func<object> Factory { get; set; }
 
         public Func<object> Activator { get; set; }
 

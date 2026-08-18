@@ -3,12 +3,20 @@ name: Publish to npmjs
 on:
   push:
     branches: [master]
-  workflow_call:
+  workflow_dispatch:
     inputs:
       bump_type:
-        type: string
-        required: false
-        default: ''
+        description: 'Which version part to bump'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+concurrency:
+  group: publish-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -17,52 +25,115 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Verify release branch
+        run: test "$GITHUB_REF" = "refs/heads/master"
 
       - name: Configure git identity
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump version (when invoked by Manual Publish)
+      - name: Bump version (when manually dispatched)
         if: inputs.bump_type
         run: |
           NEW_VERSION=$(npm version "${{ inputs.bump_type }}" --no-git-tag-version | sed 's/^v//')
           git add package.json
           git commit -m "release:v$NEW_VERSION"
-          git push origin HEAD
+          git push origin "HEAD:${GITHUB_REF_NAME}"
           echo "Bumped package.json to v$NEW_VERSION"
 
-      - name: Check version against existing tag
+      - name: Check package and tag state
         id: check
         run: |
+          PACKAGE=$(node -p "require('./package.json').name")
           VERSION=$(node -p "require('./package.json').version")
+          echo "package=$PACKAGE" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
-            echo "should_publish=false" >> $GITHUB_OUTPUT
-            echo "Tag v$VERSION already exists. Skipping publish."
+
+          if npm view "$PACKAGE@$VERSION" version >/dev/null 2>&1; then
+            PUBLISHED=true
           else
-            echo "should_publish=true" >> $GITHUB_OUTPUT
-            echo "Will publish v$VERSION"
+            PUBLISHED=false
           fi
 
-      - name: Upgrade npm for OIDC support
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            TAGGED=true
+          else
+            TAGGED=false
+          fi
+
+          if [ "$PUBLISHED" = true ] && [ "$TAGGED" = false ]; then
+            PUBLISHED_HEAD=$(npm view "$PACKAGE@$VERSION" gitHead 2>/dev/null || true)
+            CURRENT_HEAD=$(git rev-parse HEAD)
+            if [ -z "$PUBLISHED_HEAD" ] || [ "$PUBLISHED_HEAD" != "$CURRENT_HEAD" ]; then
+              echo "Registry contains $PACKAGE@$VERSION, but its gitHead cannot be matched to this commit. Refusing to create a misleading tag."
+              exit 1
+            fi
+          fi
+
+          if [ "$PUBLISHED" = false ] && [ "$TAGGED" = true ]; then
+            TAG_HEAD=$(git rev-list -n 1 "v$VERSION")
+            CURRENT_HEAD=$(git rev-parse HEAD)
+            if [ "$TAG_HEAD" != "$CURRENT_HEAD" ]; then
+              echo "Tag v$VERSION exists on $TAG_HEAD, but the registry entry is missing and HEAD is $CURRENT_HEAD. Publish recovery must run from the tagged commit."
+              exit 1
+            fi
+          fi
+
+          if [ "$PUBLISHED" = true ]; then
+            echo "should_publish=false" >> $GITHUB_OUTPUT
+            echo "$PACKAGE@$VERSION already exists in the registry."
+          else
+            echo "should_publish=true" >> $GITHUB_OUTPUT
+            echo "Will publish $PACKAGE@$VERSION."
+          fi
+
+          if [ "$TAGGED" = true ]; then
+            echo "should_tag=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_tag=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install pinned npm for trusted publishing
         if: steps.check.outputs.should_publish == 'true'
-        run: npm install -g npm@latest
+        run: npm install -g npm@11.18.0
+
+      - name: Verify published Kylin dependencies
+        if: steps.check.outputs.should_publish == 'true'
+        run: |
+          node -e "const p=require('./package.json'); for (const [name, version] of Object.entries(p.dependencies || {})) if (name.startsWith('com.kylin.')) console.log(name + '@' + version)" |
+          while IFS= read -r dependency; do
+            npm view "$dependency" version >/dev/null || {
+              echo "Required dependency $dependency is not published yet."
+              exit 1
+            }
+          done
+
+      - name: Pack the exact artifact
+        if: steps.check.outputs.should_publish == 'true'
+        id: pack
+        run: |
+          npm pack --dry-run
+          TARBALL=$(npm pack --silent)
+          test -n "$TARBALL"
+          echo "tarball=$TARBALL" >> $GITHUB_OUTPUT
 
       - name: Publish with trusted publishing
         if: steps.check.outputs.should_publish == 'true'
-        run: npm publish --access public
+        run: npm publish "${{ steps.pack.outputs.tarball }}" --access public
 
       - name: Tag the published version
-        if: steps.check.outputs.should_publish == 'true'
+        if: steps.check.outputs.should_tag == 'true'
         run: |
           git tag "v${{ steps.check.outputs.version }}"
           git push origin "v${{ steps.check.outputs.version }}"
